@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections;
+﻿using System.Collections;
 using UnityEngine;
 using UnityEngine.Audio;
 using UnityEngine.InputSystem;
@@ -49,17 +48,15 @@ public class GlobalController : Singleton<GlobalController> {
     }
 
     public void Awake() => Set(this);
-    public void OnDestroy() => Release();
 
     public void Start() {
         if (!Application.isFocused) {
             if (Settings.Instance.audioMuteMusicOnUnfocus) mixer.SetFloat("MusicVolume", -80f);
-            if (Settings.Instance.audioMuteSFXOnUnfocus)   mixer.SetFloat("SoundVolume", -80f);
+            if (Settings.Instance.audioMuteSFXOnUnfocus) mixer.SetFloat("SoundVolume", -80f);
         }
         ControlSystem.controls.Debug.FPSMonitor.performed += (context) => {
             graphy.SetActive(!graphy.activeSelf);
         };
-        UnityEngine.Random.InitState((int) DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalMilliseconds);
     }
 
     public void Update() {
@@ -69,7 +66,7 @@ public class GlobalController : Singleton<GlobalController> {
         if (Settings.Instance.graphicsNdsEnabled && SceneManager.GetActiveScene().buildIndex != 0) {
             float aspect = (float) currentWidth / currentHeight;
             int targetHeight = 224;
-            int targetWidth = (int) (targetHeight * (Settings.Instance.graphicsNdsForceAspect ? (4/3f) : aspect));
+            int targetWidth = Mathf.CeilToInt(targetHeight * (Settings.Instance.graphicsNdsForceAspect ? (4/3f) : aspect));
             if (ndsTexture == null || ndsTexture.width != targetWidth || ndsTexture.height != targetHeight) {
                 if (ndsTexture != null)
                     ndsTexture.Release();

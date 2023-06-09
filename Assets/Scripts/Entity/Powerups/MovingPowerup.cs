@@ -58,8 +58,9 @@ namespace NSMB.Entities.Collectable.Powerups {
         public void Awake() {
             collectScript = GetComponent<IPowerupCollect>();
 
-            if (GroundMask == 0)
+            if (GroundMask == 0) {
                 GroundMask = (1 << Layers.LayerGround) | (1 << Layers.LayerPassthrough);
+            }
         }
 
         public void OnBeforeSpawned(float pickupDelay) {
@@ -206,8 +207,8 @@ namespace NSMB.Entities.Collectable.Powerups {
 
                 if (SpawnAnimationTimer.ExpiredOrNotRunning(Runner)) {
 
-                    if (Utils.Utils.IsTileSolidAtWorldLocation(body.position + new Vector2(0, hitbox.size.y * 0.5f))) {
-                        Runner.Despawn(Object);
+                    if (Utils.Utils.IsTileSolidAtWorldLocation(body.position + hitbox.offset)) {
+                        DespawnEntity();
                         return;
                     }
 
@@ -223,7 +224,7 @@ namespace NSMB.Entities.Collectable.Powerups {
                 return;
             }
 
-            Vector2 size = hitbox.size * transform.lossyScale * 0.8f;
+            Vector2 size = hitbox.size * transform.lossyScale * 0.7f;
             Vector2 origin = body.position + hitbox.offset * transform.lossyScale;
 
             if (Utils.Utils.IsAnyTileSolidBetweenWorldBox(origin, size) || Runner.GetPhysicsScene2D().OverlapBox(origin, size, 0, GroundMask)) {
@@ -309,7 +310,8 @@ namespace NSMB.Entities.Collectable.Powerups {
 
             switch (ReserveResult) {
             case PowerupReserveResult.ReserveOldPowerup: {
-                Collector.SetReserveItem(oldState);
+                if (oldState != Enums.PowerupState.NoPowerup)
+                    Collector.SetReserveItem(oldState);
                 break;
             }
             case PowerupReserveResult.ReserveNewPowerup: {
@@ -340,24 +342,20 @@ namespace NSMB.Entities.Collectable.Powerups {
             PlayerController collector = powerup.Collector;
 
             Powerup newPowerup = powerup.powerupScriptable;
-            Enums.PowerupState newState = newPowerup.state;
 
             switch (powerup.ReserveResult) {
+            case PowerupReserveResult.ReserveOldPowerup:
             case PowerupReserveResult.NoneButPlaySound: {
-                //just play the collect sound
-                collector.PlaySound(newPowerup.soundEffect);
-                break;
-            }
-            case PowerupReserveResult.ReserveOldPowerup: {
-                //reserve the powerup we just had
-                if (newState == Enums.PowerupState.MegaMushroom)
-                    break;
-
-                collector.PlaySound(newPowerup.soundEffect);
+                // Just play the collect sound
+                if (newPowerup.soundPlaysEverywhere) {
+                    collector.PlaySoundEverywhere(newPowerup.soundEffect);
+                } else {
+                    collector.PlaySound(newPowerup.soundEffect);
+                }
                 break;
             }
             case PowerupReserveResult.ReserveNewPowerup: {
-                //reserve the new powerup
+                // Reserve the new powerup
                 collector.PlaySound(Enums.Sounds.Player_Sound_PowerupReserveStore);
                 break;
             }

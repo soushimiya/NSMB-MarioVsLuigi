@@ -77,7 +77,9 @@ namespace NSMB.Entities {
             fireGraphics.SetActive(false);
 
             transform.SetParent(GameManager.Instance.objectPoolParent.transform);
-            GameData.Instance.PooledFireballs.Add(this);
+
+            if (!GameData.Instance.PooledFireballs.Contains(this))
+                GameData.Instance.PooledFireballs.Add(this);
         }
 
         public override void FixedUpdateNetwork() {
@@ -223,7 +225,7 @@ namespace NSMB.Entities {
             // Should do damage checks
             if (!player.IsStarmanInvincible) {
 
-                bool sameTeam = player.data.Team == Owner.data.Team;
+                bool dropStars = player.data.Team != Owner.data.Team;
 
                 // Player state checks
                 switch (player.State) {
@@ -231,25 +233,27 @@ namespace NSMB.Entities {
                     return;
                 }
                 case Enums.PowerupState.MiniMushroom: {
-                    if (sameTeam)
-                        player.DoKnockback(!FacingRight, 0, true, Object);
-                    else
+                    if (dropStars)
                         player.Death(false, false);
+                    else
+                        player.DoKnockback(!FacingRight, 0, true, Object);
 
                     DespawnEntity();
                     return;
                 }
                 case Enums.PowerupState.BlueShell: {
-                    if (IsIceball && (player.IsInShell || player.IsCrouching || player.IsGroundpounding))
+                    if (IsIceball && (player.IsInShell || player.IsCrouching || player.IsGroundpounding)) {
                         player.ShellSlowdownTimer = TickTimer.CreateFromSeconds(Runner, 0.65f);
+                        DespawnEntity();
+                        return;
+                    }
 
-                    DespawnEntity();
-                    return;
+                    break;
                 }
                 }
 
                 // Collision is a GO
-                if (IsIceball) {
+                if (IsIceball && dropStars) {
                     // Iceball
                     if (!player.IsFrozen) {
                         Runner.Spawn(PrefabList.Instance.Obj_FrozenCube, body.position, onBeforeSpawned: (runner, obj) => {
@@ -259,7 +263,7 @@ namespace NSMB.Entities {
                     }
                 } else {
                     // Fireball
-                    player.DoKnockback(!FacingRight, sameTeam ? 0 : 1, true, Object);
+                    player.DoKnockback(!FacingRight, dropStars ? 1 : 0, true, Object);
                 }
             }
 
@@ -274,6 +278,7 @@ namespace NSMB.Entities {
 
             // Fire + ice = both destroy
             if (IsIceball) {
+                DespawnEntity();
                 fireball.DespawnEntity();
                 return true;
             }
@@ -286,6 +291,7 @@ namespace NSMB.Entities {
 
             // Fire + ice = both destroy
             if (!IsIceball) {
+                DespawnEntity();
                 iceball.DespawnEntity();
                 return true;
             }

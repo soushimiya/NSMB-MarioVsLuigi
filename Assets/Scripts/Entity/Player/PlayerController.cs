@@ -22,7 +22,7 @@ namespace NSMB.Entities.Player {
 
         //---Static Variables
         private static readonly Collider2D[] CollisionBuffer = new Collider2D[64];
-        private static readonly Collider2D[] TempCollisionBuffer = new Collider2D[64];
+        private static readonly Collider2D[] TempCollisionBuffer = new Collider2D[32];
         private static readonly ContactPoint2D[] TileContactBuffer = new ContactPoint2D[32];
         private static ContactFilter2D CollisionFilter;
 
@@ -142,8 +142,8 @@ namespace NSMB.Entities.Player {
         public bool IsStarmanInvincible => StarmanTimer.IsActive(Runner);
         public bool IsDamageable => !IsStarmanInvincible && DamageInvincibilityTimer.ExpiredOrNotRunning(Runner);
         public int PlayerId => data.PlayerId;
-        public bool CanPickupItem => State != Enums.PowerupState.MiniMushroom && !IsSkidding && !IsTurnaround && !HeldEntity && PreviousInputs.buttons.IsSet(PlayerControls.Sprint) && !IsPropellerFlying && !IsSpinnerFlying && !IsCrouching && !IsDead && !WallSlideLeft && !WallSlideRight && JumpState < PlayerJumpState.DoubleJump && !IsGroundpounding && !(!HeldEntity && IsSwimming && PreviousInputs.buttons.IsSet(PlayerControls.Jump));
-        public bool HasGroundpoundHitbox => IsGroundpounding && !IsOnGround && GroundpoundStartTimer.ExpiredOrNotRunning(Runner);
+        public bool CanPickupItem => !FrozenCube && State != Enums.PowerupState.MiniMushroom && !IsSkidding && !IsTurnaround && !HeldEntity && PreviousInputs.buttons.IsSet(PlayerControls.Sprint) && !IsPropellerFlying && !IsSpinnerFlying && !IsCrouching && !IsDead && !WallSlideLeft && !WallSlideRight && JumpState < PlayerJumpState.DoubleJump && !IsGroundpounding && !(!HeldEntity && IsSwimming && PreviousInputs.buttons.IsSet(PlayerControls.Jump));
+        public bool HasGroundpoundHitbox => (IsDrilling || (IsGroundpounding && GroundpoundStartTimer.ExpiredOrNotRunning(Runner))) && !IsOnGround;
         public float RunningMaxSpeed => SPEED_STAGE_MAX[RUN_STAGE];
         public float WalkingMaxSpeed => SPEED_STAGE_MAX[WALK_STAGE];
         public BoxCollider2D MainHitbox => hitboxes[0];
@@ -357,7 +357,9 @@ namespace NSMB.Entities.Player {
             networkRigidbody.TeleportToPosition(spawnpoint);
             cameraController.Recenter(spawnpoint);
 
-            GameData.Instance.AlivePlayers.Add(this);
+            if (!GameData.Instance.AlivePlayers.Contains(this)) {
+                GameData.Instance.AlivePlayers.Add(this);
+            }
             GameManager.Instance.teamManager.AddPlayer(this);
 
             ControlSystem.controls.Enable();
@@ -455,7 +457,9 @@ namespace NSMB.Entities.Player {
                     IgnoreCoyoteTime = false;
 
                 if (previousTickIsOnGround) {
-                    IsOnGround |= GroundSnapCheck();
+                    if (!IsOnGround) {
+                        IsOnGround = GroundSnapCheck();
+                    }
 
                     if (!IsOnGround) {
                         if (!IgnoreCoyoteTime)
@@ -476,6 +480,10 @@ namespace NSMB.Entities.Player {
             animationController.HandlePipeAnimation();
 
             UpdateHitbox();
+
+            // We can become stuck in a block after uncrouching
+            if (!IsDead)
+                HandleStuckInBlock();
         }
         #endregion
 
@@ -510,11 +518,14 @@ namespace NSMB.Entities.Player {
             tilesJumpedInto.Clear();
             tilesStandingOn.Clear();
             tilesHitSide.Clear();
+            crushGround = false;
+            OnSpinner = null;
+
+            if (IsStuckInBlock)
+                return;
 
             int down = 0, left = 0, right = 0, up = 0;
 
-            crushGround = false;
-            OnSpinner = null;
             foreach (BoxCollider2D hitbox in hitboxes) {
                 int collisionCount = hitbox.GetContacts(TileContactBuffer);
 
@@ -539,8 +550,10 @@ namespace NSMB.Entities.Player {
 
                         crushGround |= !go.CompareTag("platform") && !go.CompareTag("frozencube");
                         down++;
-                        if (go.CompareTag("spinner"))
+                        if (go.CompareTag("spinner")) {
                             OnSpinner = go.GetComponentInParent<SpinnerAnimator>();
+                            OnSpinner.HasPlayer = true;
+                        }
 
                         if (!tilesStandingOn.Contains(vec))
                             tilesStandingOn.Add(vec);
@@ -635,10 +648,10 @@ namespace NSMB.Entities.Player {
 
         public void InteractWithPlayer(PlayerController other) {
 
-            if (DamageInvincibilityTimer.IsActive(Runner))
+            if (DamageInvincibilityTimer.IsActive(Runner) || other.DamageInvincibilityTimer.IsActive(Runner))
                 return;
 
-            if (other.DamageInvincibilityTimer.IsActive(Runner))
+            if (GiantStartTimer.IsActive(Runner) || other.GiantStartTimer.IsActive(Runner))
                 return;
 
             // Hit players
@@ -669,7 +682,11 @@ namespace NSMB.Entities.Player {
                     return;
                 }
 
-                other.Powerdown(false);
+                if (dropStars) {
+                    other.Powerdown(false);
+                } else {
+                    other.DoKnockback(!fromRight, 0, true, Object);
+                }
                 return;
             }
 
@@ -687,7 +704,11 @@ namespace NSMB.Entities.Player {
                     }
                 } else if (State == Enums.PowerupState.MegaMushroom) {
                     // Only we are giant
-                    other.Powerdown(false);
+                    if (dropStars) {
+                        other.Powerdown(false);
+                    } else {
+                        other.DoKnockback(!fromRight, 0, true, Object);
+                    }
                 }
                 return;
             }
@@ -702,7 +723,11 @@ namespace NSMB.Entities.Player {
                         DoKnockback(fromRight, dropStars ? 1 : 0, true, other.Object);
                         other.DoKnockback(!fromRight, dropStars ? 1 : 0, true, Object);
                     } else {
-                        other.Powerdown(false);
+                        if (dropStars) {
+                            other.Powerdown(false);
+                        } else {
+                            other.DoKnockback(!fromRight, 0, true, Object);
+                        }
                     }
                     float dotRight = Vector2.Dot((body.position - other.body.position).normalized, Vector2.right);
                     FacingRight = dotRight > 0;
@@ -922,6 +947,7 @@ namespace NSMB.Entities.Player {
             }
             }
             IsPropellerFlying = false;
+            IsInShell = false;
             PropellerLaunchTimer = TickTimer.None;
             PropellerSpinTimer = TickTimer.None;
             UsedPropellerThisJump = false;
@@ -943,13 +969,14 @@ namespace NSMB.Entities.Player {
             FrozenCube.AutoBreakTimer = TickTimer.CreateFromSeconds(Runner, 1.75f);
             animator.enabled = false;
             body.isKinematic = true;
-            body.simulated = false;
             IsInKnockback = false;
             IsSkidding = false;
             IsDrilling = false;
             WallSlideLeft = false;
             WallSlideRight = false;
             IsPropellerFlying = false;
+
+            AttemptThrowHeldItem();
 
             PropellerLaunchTimer = TickTimer.None;
             IsSkidding = false;
@@ -961,7 +988,6 @@ namespace NSMB.Entities.Player {
 
             IsFrozen = false;
             animator.enabled = true;
-            body.simulated = true;
             body.isKinematic = false;
 
             int knockbackStars = reason switch {
@@ -1523,7 +1549,6 @@ namespace NSMB.Entities.Player {
             if (hit) {
                 //hit ground
                 float angle = Vector2.SignedAngle(Vector2.up, hit.normal);
-                hit.point += Vector2.down * 0.1f;
                 if (Mathf.Abs(angle) > 89)
                     return;
 
@@ -1544,7 +1569,6 @@ namespace NSMB.Entities.Player {
                 hit = Runner.GetPhysicsScene2D().BoxCast(body.position + (Vector2.up * 0.05f), new Vector2((MainHitbox.size.x + Physics2D.defaultContactOffset * 3f) * transform.lossyScale.x, 0.1f), 0, Vector2.down, 0.3f, Layers.MaskAnyGround);
                 if (hit) {
                     float angle = Vector2.SignedAngle(Vector2.up, hit.normal);
-                    hit.point += Vector2.down * 0.1f;
                     if (Mathf.Abs(angle) > 89)
                         return;
 
@@ -1574,7 +1598,7 @@ namespace NSMB.Entities.Player {
         private void HandleLayerState() {
             bool hitsNothing = CurrentPipe || IsDead || IsStuckInBlock || GiantStartTimer.IsActive(Runner) || (GiantEndTimer.IsActive(Runner) && IsStationaryGiantShrink);
 
-            gameObject.layer = hitsNothing ? Layers.LayerHitsNothing : Layers.LayerPlayer;
+            MainHitbox.gameObject.layer = hitsNothing ? Layers.LayerHitsNothing : Layers.LayerPlayer;
         }
 
         private bool GroundSnapCheck() {
@@ -1596,6 +1620,11 @@ namespace NSMB.Entities.Player {
             hit = Runner.GetPhysicsScene2D().BoxCast(body.position + Vector2.up * 0.15f, new Vector2(WorldHitboxSize.x, 0.05f), 0, Vector2.down, 0.4f, Layers.MaskAnyGround);
             if (hit) {
                 body.position = new(body.position.x, hit.point.y + Physics2D.defaultContactOffset);
+
+                if (hit.collider.gameObject.CompareTag("spinner")) {
+                    OnSpinner = hit.collider.gameObject.GetComponentInParent<SpinnerAnimator>();
+                    OnSpinner.HasPlayer = true;
+                }
                 return true;
             }
 
@@ -1662,7 +1691,7 @@ namespace NSMB.Entities.Player {
 
         private void HandleCrouching(bool crouchInput) {
             // Can't crouch while sliding, flying, or mega.
-            if (IsSliding || IsPropellerFlying || IsInKnockback || State == Enums.PowerupState.MegaMushroom) {
+            if (IsSliding || IsPropellerFlying || IsSpinnerFlying || IsInKnockback || State == Enums.PowerupState.MegaMushroom) {
                 IsCrouching = false;
                 return;
             }
@@ -1858,6 +1887,7 @@ namespace NSMB.Entities.Player {
             IsJumping = true;
             JumpAnimCounter++;
             JumpBufferTime = -1;
+            IsInKnockback = false;
 
             BounceJump = DoEntityBounce;
             DoEntityBounce = false;
@@ -2104,79 +2134,62 @@ namespace NSMB.Entities.Player {
         }
 
 
-        private static readonly Vector2 StuckInBlockSizeCheck = new(1f, 0.75f);
+        private static readonly Vector2 StuckInBlockSizeCheck = new(1f, 0.95f);
         private bool HandleStuckInBlock() {
             if (!body || State == Enums.PowerupState.MegaMushroom)
                 return false;
 
             Vector2 checkSize = WorldHitboxSize * StuckInBlockSizeCheck;
-            Vector2 checkPos = transform.position + (Vector3) (Vector2.up * checkSize * 0.5f);
+            Vector2 origin = body.position + (Vector2.up * checkSize * 0.5f);
 
-            if (!Utils.Utils.IsAnyTileSolidBetweenWorldBox(checkPos, checkSize * 0.9f, false)) {
+            if (!Utils.Utils.IsAnyTileSolidBetweenWorldBox(origin, checkSize, true)) {
                 IsStuckInBlock = false;
                 return false;
             }
-            bool wasStuckLastFrame = IsStuckInBlock;
+
+            bool wasStuckLastTick = IsStuckInBlock;
             IsStuckInBlock = true;
-            body.velocity = Vector2.zero;
             IsGroundpounding = false;
             IsPropellerFlying = false;
             IsDrilling = false;
             IsSpinnerFlying = false;
-            IsOnGround = true;
+            IsOnGround = false;
             IsSwimming = false;
 
-            if (!wasStuckLastFrame) {
+            if (!wasStuckLastTick) {
                 // Code for mario to instantly teleport to the closest free position when he gets stuck
 
-                //prevent mario from clipping to the floor if we got pushed in via our hitbox changing (shell on ice, for example)
-                transform.position = body.position = previousTickPosition;
-                checkPos = transform.position + (Vector3) (Vector2.up * checkSize * 0.5f);
+                // Prevent mario from clipping to the floor if we got pushed in via our hitbox changing (shell on ice, for example)
+                body.position = previousTickPosition;
+                origin = body.position + (checkSize * 0.5f * Vector2.up);
 
-                float distanceInterval = 0.025f;
-                float minimDistance = 0.95f; // if the minimum actual distance is anything above this value this code will have no effect
-                float travelDistance = 0;
-                float targetInd = -1; // Basically represents the index of the interval that'll be chosen for mario to be popped out
-                int angleInterval = 45;
+                int angle = 45;
+                int increments = 360 / angle;
+                float distIncrement = 0.1f;
+                float distMax = 0.6f;
 
-                for (float i = 0; i < 360 / angleInterval; i++) { // Test for every angle in the given interval
-                    float ang = i * angleInterval;
-                    float testDistance = 0;
+                for (int i = 0; i < increments; i++) {
 
-                    float radAngle = Mathf.PI * ang / 180;
-                    Vector2 testPos;
+                    float radAngle = ((i * angle * 2) + ((i / 4) * angle) % 360) * Mathf.Deg2Rad;
+                    float x = Mathf.Sin(radAngle);
+                    float y = Mathf.Cos(radAngle);
 
-                    // Calculate the distance mario would have to be moved on a certain angle to stop collisioning
-                    do {
-                        testPos = checkPos + new Vector2(Mathf.Cos(radAngle) * testDistance, Mathf.Sin(radAngle) * testDistance);
-                        testDistance += distanceInterval;
-                    } while (Utils.Utils.IsAnyTileSolidBetweenWorldBox(testPos, checkSize * 0.975f));
+                    float dist = 0;
+                    while ((dist += distIncrement) < distMax) {
 
-                    // This is to give right angles more priority over others when deciding
-                    float adjustedDistance = testDistance * (1 + Mathf.Abs(Mathf.Sin(radAngle * 2) / 2));
+                        Vector2 checkPos = new(origin.x + (x * dist), origin.y + (y * dist));
 
-                    // Set the new minimum only if the new position is inside of the visible level
-                    if (testPos.y > GameManager.Instance.cameraMinY && testPos.x > GameManager.Instance.cameraMinX && testPos.x < GameManager.Instance.cameraMaxX) {
-                        if (adjustedDistance < minimDistance) {
-                            minimDistance = adjustedDistance;
-                            travelDistance = testDistance;
-                            targetInd = i;
-                        }
+                        if (Utils.Utils.IsAnyTileSolidBetweenWorldBox(checkPos, checkSize, true))
+                            continue;
+
+                        // Valid spot.
+                        body.position = checkPos + (Vector2.down * checkSize * 0.5f);
+                        IsStuckInBlock = false;
+                        return false;
                     }
                 }
 
-                // Move him
-                if (targetInd != -1) {
-                    // Freed
-                    float radAngle = Mathf.PI * (targetInd * angleInterval) / 180;
-                    Vector2 lastPos = checkPos;
-                    checkPos += new Vector2(Mathf.Cos(radAngle) * travelDistance, Mathf.Sin(radAngle) * travelDistance);
-                    transform.position = body.position = new(checkPos.x, body.position.y + (checkPos.y - lastPos.y));
-                    IsStuckInBlock = false;
-                    return true;
-                } else {
-                    body.position = previousTickPosition;
-                }
+                body.position = previousTickPosition;
             }
 
             body.velocity = Vector2.right * 2f;
@@ -2226,7 +2239,6 @@ namespace NSMB.Entities.Player {
             GiantEndTimer = TickTimer.CreateFromSeconds(Runner, giantStartTime * 0.5f);
             IsStationaryGiantShrink = false;
             DamageInvincibilityTimer = TickTimer.CreateFromSeconds(Runner, 2f);
-            PlaySoundEverywhere(Enums.Sounds.Powerup_MegaMushroom_End);
 
             if (body.velocity.y > 0)
                 body.velocity = new(body.velocity.x, body.velocity.y * 0.33f);
@@ -3078,8 +3090,11 @@ namespace NSMB.Entities.Player {
             Enums.PowerupState previous = player.PreviousState;
             Enums.PowerupState current = player.State;
 
-            // we've taken damage when we go from > mushroom to mushroom, or mushroom to no powerup
+            // Don't worry about Mega Mushrooms.
+            if (previous == Enums.PowerupState.MegaMushroom)
+                return;
 
+            // We've taken damage when we go from > mushroom to mushroom, or mushroom to no powerup
             if ((previous > Enums.PowerupState.Mushroom && current == Enums.PowerupState.Mushroom)
                 || (previous == Enums.PowerupState.Mushroom && current == Enums.PowerupState.NoPowerup)) {
                 // Taken damage
@@ -3126,10 +3141,7 @@ namespace NSMB.Entities.Player {
         public static void OnGiantTimerChanged(Changed<PlayerController> changed) {
             PlayerController player = changed.Behaviour;
 
-            if (!player.GiantTimer.IsRunning)
-                return;
-
-            player.PlaySoundEverywhere(Enums.Sounds.Player_Voice_MegaMushroom);
+            player.PlaySoundEverywhere(player.GiantTimer.IsRunning ? Enums.Sounds.Player_Voice_MegaMushroom : Enums.Sounds.Powerup_MegaMushroom_End);
         }
 
         public static void OnIsStationaryGiantShrinkChanged(Changed<PlayerController> changed) {

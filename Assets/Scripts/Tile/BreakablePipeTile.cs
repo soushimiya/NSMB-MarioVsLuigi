@@ -41,7 +41,7 @@ namespace NSMB.Tiles {
             }
             if (!leftOfPipe && direction == InteractionDirection.Right) {
                 if (Utils.Utils.GetTileAtTileLocation(ourLocation + Vector2Int.left) is InteractableTile otherPipe) {
-                    return otherPipe.Interact(interacter, direction, worldLocation + (Vector3.left* 0.5f), out bumpSound);
+                    return otherPipe.Interact(interacter, direction, worldLocation + (Vector3.left * 0.5f), out bumpSound);
                 }
             }
 
@@ -51,7 +51,7 @@ namespace NSMB.Tiles {
             Vector2Int hat = origin - (pipeDirection * (height - 1));
 
             if (ourLocation.y == GameManager.Instance.levelMinTileY + 1)
-                //exception: dont break out of bounds.
+                // Exception: dont break out of bounds.
                 return false;
 
             bool bottom = false;
@@ -64,15 +64,15 @@ namespace NSMB.Tiles {
             bool addHat = true;
 
             if (direction == InteractionDirection.Down || direction == InteractionDirection.Up) {
-                //hit top/bottom of pipe.
+                // Hit top/bottom of pipe.
                 if (hat == origin || height <= 1)
                     return false;
 
-                //shrink the pipe by 1. simple as moving the hat tiles up/down one
+                // Shrink the pipe by 1. simple as moving the hat tiles up/down one
                 tileHeight = 2;
                 shrink = true;
             } else {
-                //hit left/right side of pipe
+                // Hit left/right side of pipe
 
                 Vector2 world = worldLocation;
                 tilemap.GetTile(hat, out BreakablePipeTile hatTile);

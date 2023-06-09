@@ -11,7 +11,7 @@ public class AuthenticationHandler {
     //---Static Variables
     private static readonly string URL = "https://mariovsluigi.azurewebsites.net/auth/init";
 
-    public static bool IsAuthenticating { get; set; }
+    public static bool IsAuthenticating { get; private set; }
 
     public async static Task<AuthenticationValues> Authenticate(string userid, string token) {
 
@@ -34,7 +34,7 @@ public class AuthenticationHandler {
 
         if (client.result != UnityWebRequest.Result.Success) {
             if (MainMenuManager.Instance) {
-                MainMenuManager.Instance.OpenErrorBox(client.error + " - " + client.responseCode);
+                //MainMenuManager.Instance.OpenNetworkErrorBox(client.error + " - " + client.responseCode);
                 //MainMenuManager.Instance.OnDisconnected(DisconnectCause.CustomAuthenticationFailed);
             }
             IsAuthenticating = false;
@@ -48,6 +48,7 @@ public class AuthenticationHandler {
 
         client.Dispose();
 
+        IsAuthenticating = false;
         return values;
     }
 }
